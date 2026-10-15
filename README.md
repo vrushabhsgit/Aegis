@@ -1,90 +1,88 @@
 # Aegis
 
-**Secure, grounded answers from your internal documents.**
+**Ask questions about company policies and get clear, cited answers.**
 
-Access control is enforced before retrieval. Every claim is quoted and verified. Versions are tracked. Every query is audited.
+Only people who are allowed to see a document can get answers from it. Every answer quotes the exact sentence it came from. Old policies are not treated as current. Every question is logged.
 
 ---
 
-Aegis is a production-oriented RAG system built for company policies and internal knowledge. Employees ask questions in plain language. The system returns cited answers — and never shows them documents they are not allowed to see.
+Aegis is a RAG assistant for internal company documents (leave policy, security policy, travel rules, refunds, etc.). Employees type a normal question and get an answer with sources. People from other departments and guests never see restricted files.
 
-Unlike most RAG demos, permissions are applied in SQL *before* any search runs. A restricted document is never a candidate, never reranked, and never seen by the model.
+Access control is applied in the database **before** any search runs. A document the user cannot read is never retrieved and never shown to the AI.
 
-## Why it exists
+## What it does
 
-Shared drives and wikis make it hard to find the current rule. Generic RAG systems make it worse: they ignore access control, mix superseded policies with current ones, and generate ungrounded answers.
+A company has departments (HR, finance, engineering, support). Each owns its own documents. Employees should be able to ask questions instead of searching through shared drives — while keeping sensitive documents protected.
 
-Aegis treats those problems as first-class:
-
-- Department-level access (public / internal / restricted)
-- Active vs superseded document versions
-- Exact-quote grounding checked in code
-- Hybrid search (vector + keyword) with reciprocal rank fusion
-- Full audit trail of every question
+- **Access control** — Public, internal, and restricted documents. Guests see only public content. Employees see public + internal + restricted documents from their own department.
+- **Exact quotes** — Every claim in the answer must copy a real sentence from the document. Fake quotes are rejected.
+- **Versions** — Policies can exist as active and superseded versions. The system uses the correct one.
+- **Audit trail** — Every question is saved (who asked, what they asked, which sources were used).
 
 ## Quick start
 
 ```bash
-# 1. Start the database
+# Start the database
 docker compose up -d
 
-# 2. Configure
+# Set your OpenAI key
 cp .env.example .env
-# set OPENAI_API_KEY
+# then edit .env and add:
+# OPENAI_API_KEY=sk-...
+# DATABASE_URL=postgresql://rag:ragsecret@localhost:5433/ragdb
 
-# 3. Run
+# Run the app
 uv run uvicorn assistant.api:app --reload
 ```
 
-Open http://localhost:8000. Upload Markdown policies (with the required header) and ask questions as different users.
+Open http://localhost:8000.
 
-Demo users are seeded:
+Upload policy files through the web page and ask questions as different users.
 
-| User  | Department  | Can see                                      |
-| ----- | ----------- | -------------------------------------------- |
-| alice | engineering | public + internal + restricted engineering   |
-| bob   | hr          | public + internal + restricted hr            |
-| carol | finance     | public + internal + restricted finance       |
-| guest | —           | public only                                  |
+### Demo users
+
+| User  | Department   | What they can see                          |
+|-------|--------------|--------------------------------------------|
+| alice | engineering  | Public + internal + engineering-only docs  |
+| bob   | hr           | Public + internal + HR-only docs           |
+| carol | finance      | Public + internal + finance-only docs      |
+| guest | none         | Public documents only                      |
 
 ## How it works
 
-1. **Intent** — Detects whether the question is about the current rule or historical versions.
-2. **Retrieve** — Hybrid search (pgvector HNSW + Postgres full-text) inside the user’s readable set, then LLM reranking with a score cutoff.
-3. **Grade / rewrite** — If context is insufficient, rewrite the query once and try again.
-4. **Generate** — Answer from the retrieved chunks only. Every claim must include an exact quote.
-5. **Verify** — Quotes are checked in Python against the source chunk (no model involved). Failed quotes trigger a retry.
-6. **Record** — Write an audit row and return a human-readable trace.
+1. **Check the question** — Is this about the current rule or an older version?
+2. **Search** — Look only in the documents this person can read. Combines AI search and keyword search.
+3. **Pick the best results** — Rank them and drop weak ones.
+4. **Write the answer** — Use only the text that was found. Every claim must include an exact quote.
+5. **Check the quotes** — Verify every quote really appears in the source (done in code, not by the AI).
+6. **Save a log** — Record the question, the user, and the sources used.
 
-Access control lives in the readable CTE of the hybrid search query. The permission filter cannot be bypassed by a different code path.
+## Main features
 
-## Features
+- **Access control before search** — Restricted documents never leave the database for unauthorized users.
+- **Hybrid search** — Combines AI (vector) search and normal keyword search for better results.
+- **Better ranking** — A second AI step scores the results and drops low-quality ones.
+- **Exact quotes only** — Answers must copy real sentences. Ungrounded claims are rejected.
+- **Document versions** — Active and superseded policies can coexist. The system chooses the right one.
+- **No duplicate uploads** — Uploading the same content twice does nothing. Changing the content replaces the old version.
+- **Audit log** — Every question is saved with who asked it and which sources were used.
+- **Trace** — You can see exactly what happened for each question (how many chunks were searchable, what was retrieved, etc.).
+- **Warnings** — Old documents or superseded versions trigger a warning on the answer.
 
-- **Access control before retrieval** — Restricted documents never leave the database for unauthorized users.
-- **Hybrid search + RRF** — Semantic and keyword results fused in one SQL statement.
-- **Rerank + score gate** — Low-quality chunks are dropped before they reach the answer model.
-- **Grounded generation** — Exact quotes verified in code. Ungrounded claims are rejected.
-- **Versioning** — Title + version identity. Intent decides whether superseded documents are searchable.
-- **Content-hash deduplication** — Re-uploading identical content is free. Edits replace the previous chunks.
-- **Audit trail** — Who asked what, which sources were used, whether the answer was grounded.
-- **Trace** — Every response includes a step-by-step log of retrieval decisions and searchable chunk counts.
-- **Freshness warnings** — Stale documents are flagged automatically.
+## Tech stack
 
-## Stack
+| Part       | What we use                          |
+|------------|--------------------------------------|
+| Language   | Python                               |
+| Web API    | FastAPI + Uvicorn                    |
+| AI models  | OpenAI (`gpt-4o-mini`, `text-embedding-3-small`) |
+| Database   | PostgreSQL 17 + pgvector (Docker)    |
+| Search     | Hybrid (vector + keyword)            |
+| Website    | One simple HTML page                 |
 
-| Piece         | Choice                                              |
-| ------------- | --------------------------------------------------- |
-| Language      | Python                                              |
-| API           | FastAPI + Uvicorn                                   |
-| Models        | OpenAI (`gpt-4o-mini`, `text-embedding-3-small`)    |
-| Orchestration | LangChain                                           |
-| Database      | PostgreSQL 17 + pgvector (Docker)                   |
-| Search        | Hybrid (vector + full-text) with RRF                |
-| UI            | Single HTML page                                    |
+## How to format a policy file
 
-## Document format
-
-Every file must begin with a header:
+Every uploaded file must start with this header:
 
 ```markdown
 ---
@@ -103,75 +101,48 @@ updated: 2026-06-30
 ...
 ```
 
-- `visibility` is `public`, `internal`, or `restricted`.
-- `status` is `active` or `superseded`.
-- Identity is `(title, version)`.
+- **visibility**: `public`, `internal`, or `restricted`
+- **status**: `active` or `superseded`
+- Title + version is the document’s identity
 
-## Project structure
+## Folder structure
 
-```text
+```
 .
-├── docker-compose.yml
-├── schema.sql
+├── docker-compose.yml      # Starts Postgres + pgvector
+├── schema.sql              # Creates tables and demo users
 ├── assistant/
-│   ├── config.py          # All tunable numbers
-│   ├── models.py
-│   ├── ingestion.py       # Parse, hash, split, embed
-│   ├── repository.py      # All SQL
-│   ├── retrieval.py       # Hybrid search + rerank
-│   ├── generation.py      # Answer + quote verification
-│   ├── pipeline.py        # End-to-end flow
-│   └── api.py
-├── prompts/               # answer, grade, intent, rerank, rewrite
-└── web/index.html
+│   ├── config.py           # All settings in one place
+│   ├── models.py           # Data shapes used by the system
+│   ├── ingestion.py        # Handles file uploads (parse, split, embed)
+│   ├── repository.py       # All database queries
+│   ├── retrieval.py        # Search + ranking
+│   ├── generation.py       # Writes answers and checks quotes
+│   ├── pipeline.py         # Runs the full process
+│   └── api.py              # Web endpoints
+├── prompts/                # AI instructions (plain text files)
+└── web/index.html          # Upload + chat page
 ```
 
-## Configuration
+## Who can see what
 
-All important knobs live in one file (`assistant/config.py`):
+| Visibility   | Who can read it                |
+|--------------|--------------------------------|
+| public       | Anyone (including guests)      |
+| internal     | Any employee                   |
+| restricted   | Only people in that department |
 
-- Chunk size and overlap
-- Candidate count and final top-k
-- Minimum rerank score and high-confidence shortcut
-- Maximum retrieval attempts
-- Stale document threshold
+This check happens in the database before search. The AI never sees documents the user is not allowed to read.
 
-Prompts live as plain text files so they can be edited without touching code.
+## API endpoints
 
-## Security model
-
-| Visibility | Who can read it                         |
-| ---------- | --------------------------------------- |
-| public     | Anyone (including guests)               |
-| internal   | Any employee                            |
-| restricted | Only the owning department              |
-
-The filter runs inside the search query. Retrieved means exposed — so unauthorized text is never retrieved.
-
-## API
-
-| Method | Path          | Description                      |
-| ------ | ------------- | -------------------------------- |
-| GET    | `/`           | Web UI                           |
-| GET    | `/health`     | Database status                  |
-| GET    | `/documents`  | List indexed documents           |
-| POST   | `/documents`  | Upload and index a file          |
+| Method | Path          | What it does                     |
+|--------|---------------|----------------------------------|
+| GET    | `/`           | Opens the web page               |
+| GET    | `/health`     | Checks if the database is up     |
+| GET    | `/documents`  | Lists uploaded documents         |
+| POST   | `/documents`  | Upload and index a policy file   |
 | POST   | `/ask`        | Ask a question as a given user   |
-
-In a real deployment the username comes from the authenticated session. The rest of the system already expects a `User` loaded from the database.
-
-## Production notes
-
-The layering follows the same discipline as a typical backend service: the repository owns SQL, services own behavior, the API owns HTTP.
-
-What remains for a production deployment:
-
-- Authentication (JWT / OIDC) so the caller identity is not taken from the request body
-- Rate limiting and request size limits
-- Structured logging and metrics
-- Backup strategy for the Postgres volume
-
-The current design makes those additions local.
 
 ## License
 
