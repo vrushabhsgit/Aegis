@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Aegis — Company policy assistant</title>
+    <style>
+      :root { color-scheme: light; font: 16px/1.5 system-ui, sans-serif; }
+      body { max-width: 48rem; margin: 4rem auto; padding: 0 1.25rem; color: #182230; }
+      h1 { margin-bottom: .25rem; }
+      .muted { color: #526174; }
+      form { display: grid; gap: .75rem; margin-top: 2rem; }
+      input, textarea, button { font: inherit; padding: .7rem; }
+      textarea { min-height: 6rem; }
+      button { width: fit-content; cursor: pointer; }
+      #result { white-space: pre-wrap; margin-top: 1.5rem; }
+    </style>
+  </head>
+  <body>
+    <h1>Aegis</h1>
+    <p class="muted">Ask a question about company policies and get a cited answer.</p>
+    <form id="ask-form">
+      <label for="user">Demo user</label>
+      <select id="user" name="user_id">
+        <option>alice</option><option>bob</option><option>carol</option><option>guest</option>
+      </select>
+      <label for="question">Your question</label>
+      <textarea id="question" name="text" required placeholder="How much annual leave do I get?"></textarea>
+      <button type="submit">Ask Aegis</button>
+    </form>
+    <section id="result" aria-live="polite"></section>
+    <script>
+      const form = document.querySelector('#ask-form');
+      const result = document.querySelector('#result');
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        result.textContent = 'Thinking…';
+        const payload = Object.fromEntries(new FormData(form));
+        try {
+          const response = await fetch('/ask', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          const data = await response.json();
+          result.textContent = data.answer + (data.warning ? `\n\n${data.warning}` : '');
+        } catch {
+          result.textContent = 'Could not reach Aegis. Check that the server is running.';
+        }
+      });
+    </script>
+  </body>
+</html>
