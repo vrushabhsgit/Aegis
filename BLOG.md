@@ -14,3 +14,5 @@ the company must see almost nothing. In most RAG demos this is skipped. Here it 
 design, which is why access control is applied in SQL before the search runs rather than filtered out
 afterwards.
 
+Why i chose to build this use case becuase it solve the exact problem where i can build my great intution with the rag systeam 
+
